@@ -1,0 +1,70 @@
+name: "GitHub Release"
+
+on:
+  schedule:
+    - cron: '0 0 * * *' 
+  workflow_dispatch:
+
+jobs:
+  github-release:
+    runs-on: "ubuntu-latest"
+
+    permissions:
+      contents: "write"
+
+    steps:
+      - name: "GitHub: Reactivate Repository"
+        uses: "custom-workflows/reactivate@latest"
+        with: 
+          commit_message: "github-actions: Reactivate repository"
+          committer_username: "GitHub Actions [Bot]"
+          committer_email: "github-actions[bot]@users.noreply.github.com"
+          days_elapsed: 50
+          
+      - name: "GitHub: Checkout Repository"
+        uses: "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"
+        
+      - name: "GitHub: Checkout Upstream Repository"
+        uses: "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"
+        with:
+          repository: "pyllyukko/user.js"
+          path: "upstream"
+
+      - name: "GitHub: Get Git Commit SHA"
+        id: "sha"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          UPSTREAM=$(cd upstream && git rev-parse HEAD)
+          DOWNSTREAM=$(gh release download --pattern commit.sha1 --output - || echo "")
+          
+          echo "upstream=$UPSTREAM" >> "$GITHUB_OUTPUT"
+          echo "downstream=$DOWNSTREAM" >> "$GITHUB_OUTPUT"
+
+      - name: "GitHub Create 'commit.sha1' File"
+        if: ${{ steps.sha.outputs.upstream != steps.sha.outputs.downstream }}
+        working-directory: ./upstream
+        run: echo "${{ steps.sha.outputs.upstream }}" > commit.sha1
+        
+      - name: "GitHub: Create '*.js' Files"
+        if: ${{ steps.sha.outputs.upstream != steps.sha.outputs.downstream }}
+        working-directory: ./upstream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          make systemwide_user.js
+          make locked_user.js
+          make debian_locked.js
+
+      - name: "GitHub: Create Release"
+        if: ${{ steps.sha.outputs.upstream != steps.sha.outputs.downstream }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh \
+            release \
+            create \
+            $(date '+%Y-%m-%d') \
+            ./upstream/*.js \
+            ./upstream/commit.sha1 \
+            --latest
